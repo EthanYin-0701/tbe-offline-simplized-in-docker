@@ -1,0 +1,52 @@
+{
+  "realm": "toolbox",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "editUsernameAllowed": false,
+  "clients": [
+    {
+      "clientId": "tbe-server",
+      "name": "JetBrains IDE Services",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "123456",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": true,
+      "redirectUris": [
+        "http://localhost:8080/*",
+        "http://localhost/*",
+        "https://localhost/*"
+      ],
+      "webOrigins": [
+        "http://localhost:8080",
+        "http://localhost",
+        "https://localhost",
+        "+"
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "admin",
+      "email": "toolbox.admin@example.com",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Toolbox",
+      "lastName": "Admin",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

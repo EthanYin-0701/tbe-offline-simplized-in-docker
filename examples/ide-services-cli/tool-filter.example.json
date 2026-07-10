@@ -1,0 +1,13 @@
+{
+  "_comment": "ide-services-cli tool list / tool download 的过滤器示例。用法: ide-services-cli tool download --filter tool-filter.example.json。可按产品、版本、操作系统缩小下载范围，减小离线包体积。",
+  "tools": [
+    {
+      "code": "IDEA-U",
+      "_comment_code": "IDEA-U=IntelliJ IDEA Ultimate, IDEA-C=Community",
+      "versionFilter": ">2024.1",
+      "_comment_version": "留空表示只取最新版；也可写精确 build，如 IDEA-U@241.15989.150",
+      "os": ["macos", "linux", "windows"],
+      "_comment_os": "只下载需要的 OS 可显著减小体积，例如仅 [\"macos\"]"
+    }
+  ]
+}

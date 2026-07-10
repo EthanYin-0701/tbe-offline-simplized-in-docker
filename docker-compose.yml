@@ -1,0 +1,168 @@
+# ==============================================================================
+# JetBrains IDE Services - 离线 (air-gapped) docker-compose 环境
+#
+# 参考: https://www.jetbrains.com/help/ide-services/docker-installation.html
+#
+# 组件（全部自托管，无需外网）:
+#   - postgres    : IDE Services 元数据库 (PostgreSQL 13+)
+#   - minio       : S3 兼容对象存储
+#   - minio-init  : 一次性任务，创建所需 bucket
+#   - keycloak    : 内置 OAuth2 / OIDC 认证服务 (替代 Google/Okta)
+#   - ide-services: IDE Services 服务端 (原 Toolbox Enterprise)
+#
+# 启动: docker compose up -d
+# 访问: http://localhost:${IDE_SERVICES_PORT}
+# ==============================================================================
+
+name: tbe-offline
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE}
+    container_name: tbe-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - tbe-net
+
+  minio:
+    image: ${MINIO_IMAGE}
+    container_name: tbe-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "${MINIO_API_PORT}:9000"
+      - "${MINIO_CONSOLE_PORT}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - tbe-net
+
+  # 一次性任务：等待 MinIO 就绪后创建 bucket，然后退出
+  minio-init:
+    image: ${MINIO_MC_IMAGE}
+    container_name: tbe-minio-init
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD}; do
+        echo 'waiting for minio...'; sleep 2;
+      done;
+      mc mb --ignore-existing local/${MINIO_BUCKET};
+      echo 'bucket ${MINIO_BUCKET} ready';
+      "
+    networks:
+      - tbe-net
+
+  keycloak:
+    image: ${KEYCLOAK_IMAGE}
+    container_name: tbe-keycloak
+    restart: unless-stopped
+    command: ["start-dev", "--import-realm", "--http-port=8080"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_HTTP_ENABLED: "true"
+      # 浏览器（前端）通过 localhost:8085 访问，issuer 使用该地址
+      KC_HOSTNAME: http://localhost:${KEYCLOAK_PORT}
+      KC_HOSTNAME_STRICT: "false"
+      # 允许后端（ide-services 容器 -> keycloak:8080）动态回调
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "${KEYCLOAK_PORT}:8080"
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    networks:
+      - tbe-net
+
+  ide-services:
+    image: ${IDE_SERVICES_IMAGE}
+    container_name: tbe-ide-services
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_started
+    environment:
+      # 指向挂载进来的配置文件
+      - SPRING_CONFIG_ADDITIONAL-LOCATION=/config/application.yaml
+      # 供 application.yaml 中 ${...} 引用的变量
+      # 公开 URL 走 nginx 反向代理的 HTTPS；并让 Spring 识别反代转发头
+      - TBE_DEPLOYMENT_URL=https://localhost
+      - SERVER_FORWARD-HEADERS-STRATEGY=FRAMEWORK
+      - TBE_DB_HOST=postgres:5432
+      - TBE_DB_NAME=${POSTGRES_DB}
+      - TBE_DB_USER=${POSTGRES_USER}
+      - TBE_DB_PASSWORD=${POSTGRES_PASSWORD}
+      - TBE_MINIO_URL=http://minio:9000
+      - TBE_MINIO_BUCKET=${MINIO_BUCKET}
+      - TBE_MINIO_ACCESS_KEY=${MINIO_ROOT_USER}
+      - TBE_MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD}
+      # 认证：前端用 localhost:8085，后端 backchannel 用 keycloak:8080
+      - TBE_AUTH_LOGIN_URL=http://localhost:${KEYCLOAK_PORT}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/auth
+      - TBE_AUTH_TOKEN_URL=http://keycloak:8080/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token
+      - TBE_AUTH_CERTS_URL=http://keycloak:8080/realms/${KEYCLOAK_REALM}/protocol/openid-connect/certs
+      - TBE_AUTH_CLIENT_ID=${KEYCLOAK_CLIENT_ID}
+      - TBE_AUTH_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET}
+      - TBE_ROOT_ADMIN_EMAIL=${ROOT_ADMIN_EMAIL}
+    ports:
+      # 直连 http 入口，便于调试；对外正式入口请走下面的 reverse-proxy (HTTPS)
+      - "${IDE_SERVICES_PORT}:8080"
+    volumes:
+      - ./config/application.yaml:/config/application.yaml:ro
+    networks:
+      - tbe-net
+
+  # 反向代理：在 IDE Services 前面终止 TLS（HTTPS）。
+  # JetBrains 推荐通过外部反向代理实现 HTTPS：
+  #   https://www.jetbrains.com/help/ide-services/system-requirements.html#high-availability
+  # 启动前需先生成证书: ./scripts/gen-certs.sh
+  reverse-proxy:
+    image: ${NGINX_IMAGE}
+    container_name: tbe-nginx
+    restart: unless-stopped
+    depends_on:
+      ide-services:
+        condition: service_started
+    ports:
+      - "${HTTPS_PORT}:443"
+      - "${HTTP_REDIRECT_PORT}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    networks:
+      - tbe-net
+
+volumes:
+  postgres-data:
+  minio-data:
+
+networks:
+  tbe-net:
+    driver: bridge

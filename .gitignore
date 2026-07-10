@@ -1,0 +1,9 @@
+# TLS 私钥 / 证书（勿提交）
+nginx/certs/
+
+# 离线镜像归档
+offline-images/
+
+# ide-services-cli 二进制与其下载的 artifacts
+examples/ide-services-cli/ide-services-cli
+examples/ide-services-cli/ide-services/

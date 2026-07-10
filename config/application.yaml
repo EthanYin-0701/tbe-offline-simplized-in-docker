@@ -1,0 +1,62 @@
+# ==============================================================================
+# IDE Services 服务端配置 (application.yaml)
+#
+# 参考: https://www.jetbrains.com/help/ide-services/set-up-server.html
+#
+# 本文件中的 ${...} 均由 docker-compose.yml 通过环境变量注入，
+# 因此无需在此硬编码任何主机名 / 密钥，改配置只需改 .env。
+# ==============================================================================
+
+server:
+  port: 8080
+
+tbe:
+  # 产品级“离线模式”：开启后服务端不再向 JetBrains 外部服务（marketplace、
+  # account.jetbrains.com 许可校验等）发起任何请求。
+  # 注意：开启后 IDE / 插件 / 工具需预先通过 CLI 灌入对象存储 (MinIO) 才能下发，
+  #       且仍需导入一份离线 License 才能激活。详见 README「离线模式」章节。
+  offline:
+    enabled: true
+
+  deployment:
+    # 终端用户访问的公开 URL（浏览器地址）
+    url: ${TBE_DEPLOYMENT_URL}
+
+  db:
+    host: ${TBE_DB_HOST}
+    database: ${TBE_DB_NAME}
+    user: ${TBE_DB_USER}
+    password: ${TBE_DB_PASSWORD}
+
+  # S3 兼容对象存储 (MinIO)
+  storage:
+    type: s3
+  minio:
+    url: ${TBE_MINIO_URL}
+    bucket: ${TBE_MINIO_BUCKET}
+    access-key: ${TBE_MINIO_ACCESS_KEY}
+    secret-key: ${TBE_MINIO_SECRET_KEY}
+    # s3-region 默认 us-east-1，MinIO 无需修改
+
+  # OAuth2 / OIDC 认证 (内置 Keycloak，保证离线可用)
+  auth:
+    login-url: ${TBE_AUTH_LOGIN_URL}
+    token-url: ${TBE_AUTH_TOKEN_URL}
+    jwt-certs-url: ${TBE_AUTH_CERTS_URL}
+    client-id: ${TBE_AUTH_CLIENT_ID}
+    client-secret: ${TBE_AUTH_CLIENT_SECRET}
+    required-scopes:
+      - openid
+      - profile
+      - email
+    # 首个登录后自动成为超级管理员的邮箱
+    root-admin-emails:
+      - ${TBE_ROOT_ADMIN_EMAIL}
+
+springdoc:
+  api-docs:
+    enabled: true
+
+logging:
+  level:
+    root: INFO
