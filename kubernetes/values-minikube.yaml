@@ -1,0 +1,60 @@
+# Minikube 演示环境专用配置
+# 参考最新的 ide-services-helm 结构 (所有键位于 ides.* 下)
+
+ides:
+  # 单节点 Minikube: 关闭默认的 Pod 反亲和性 (硬规则), 否则滚动更新时新旧 Pod
+  # 无法在同一节点共存, 新 Pod 会一直 Pending。
+  affinity:
+    defaultAntiAffinityEnabled: false
+
+  config:
+    deploymentUrl: "http://ide-services.local"
+    db:
+      host: "postgres-postgresql"
+      port: 5432
+      database: "ide_services"
+      user: "postgres"
+      password: "postgres-password"
+    storage:
+      type: "s3"
+      s3:
+        url: "http://minio.ide-services.svc.cluster.local:9000"
+        bucket: "ide-services"
+        accessKey: "minio-admin"
+        secretKey: "minio-password"
+        region: "us-east-1"
+    # OAuth2 / OIDC 认证, 指向 keycloak-minikube.yaml 部署的内置 Keycloak。
+    # 与仓库根目录 docker-compose.yml 的思路一致:
+    #   - login-url  走 ingress 域名 (浏览器可达), issuer 也由此固定
+    #   - token/certs 走集群内 Service DNS (后端 backchannel)
+    auth:
+      login-url: "http://keycloak.ide-services.local/realms/toolbox/protocol/openid-connect/auth"
+      token-url: "http://keycloak.ide-services.svc.cluster.local:8080/realms/toolbox/protocol/openid-connect/token"
+      jwt-certs-url: "http://keycloak.ide-services.svc.cluster.local:8080/realms/toolbox/protocol/openid-connect/certs"
+      client-id: "tbe-server"
+      client-secret: "123456"
+      required-scopes:
+        - openid
+        - profile
+        - email
+      # 首个以该邮箱登录的用户将成为超级管理员 (须与 Keycloak realm 中用户邮箱一致)
+      root-admin-emails:
+        - " 这里需要你的JetBrains管理员帐户来激活服务 "
+
+  # 入口 (注意: 键名为 ides.ingress.hostname / ingressClassName)
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hostname: ide-services.local
+    annotations:
+      nginx.ingress.kubernetes.io/proxy-body-size: "1024m"
+    tls: []
+
+  # 资源限制 (Minikube 单副本足够)
+  resources:
+    limits:
+      cpu: "1"
+      memory: 2Gi
+    requests:
+      cpu: "500m"
+      memory: 1Gi

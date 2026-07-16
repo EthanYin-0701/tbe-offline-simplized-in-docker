@@ -1,0 +1,168 @@
+# Keycloak for the Minikube demo of JetBrains IDE Services.
+#
+# 该文件为 minikube-demo.sh 提供一个内置的 OIDC 认证服务, 使 IDE Services 能够
+# 真正启动 (否则会因为缺少 OAuth 配置而 CrashLoopBackOff)。
+#
+# 设计与仓库根目录 docker-compose.yml 中的 Keycloak 保持一致:
+#   - 前端 (浏览器) 通过 ingress 域名 keycloak.ide-services.local 访问, issuer 固定为该地址
+#   - 后端 (ide-services Pod -> keycloak Service) 走集群内 DNS 做 backchannel
+#   - KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true 允许后端用 Service 地址访问
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-realm
+  namespace: ide-services
+data:
+  realm-export.json: |
+    {
+      "realm": "toolbox",
+      "enabled": true,
+      "sslRequired": "none",
+      "registrationAllowed": false,
+      "loginWithEmailAllowed": true,
+      "duplicateEmailsAllowed": false,
+      "editUsernameAllowed": false,
+      "clients": [
+        {
+          "clientId": "tbe-server",
+          "name": "JetBrains IDE Services",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": false,
+          "clientAuthenticatorType": "client-secret",
+          "secret": "123456",
+          "standardFlowEnabled": true,
+          "directAccessGrantsEnabled": true,
+          "serviceAccountsEnabled": false,
+          "fullScopeAllowed": true,
+          "redirectUris": [
+            "http://ide-services.local/*"
+          ],
+          "webOrigins": [
+            "http://ide-services.local",
+            "+"
+          ]
+        }
+      ],
+      "users": [
+        {
+          "username": "admin",
+          "email": "toolbox.admin@example.com",
+          "emailVerified": true,
+          "enabled": true,
+          "firstName": "Toolbox",
+          "lastName": "Admin",
+          "credentials": [
+            {
+              "type": "password",
+              "value": "admin",
+              "temporary": false
+            }
+          ]
+        }
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: ide-services
+  labels:
+    app: keycloak
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak
+  template:
+    metadata:
+      labels:
+        app: keycloak
+    spec:
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:26.0
+          args: ["start-dev", "--import-realm", "--http-port=8080"]
+          env:
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              value: "admin"
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              value: "admin"
+            - name: KC_HTTP_ENABLED
+              value: "true"
+            # 浏览器 (前端) 通过该地址访问, issuer 固定为此
+            - name: KC_HOSTNAME
+              value: "http://keycloak.ide-services.local"
+            - name: KC_HOSTNAME_STRICT
+              value: "false"
+            # 允许后端 (ide-services Pod) 通过集群内 Service 地址做 backchannel
+            - name: KC_HOSTNAME_BACKCHANNEL_DYNAMIC
+              value: "true"
+            - name: KC_HEALTH_ENABLED
+              value: "true"
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: management
+              containerPort: 9000
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 9000
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 60
+          resources:
+            requests:
+              cpu: "250m"
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: realm
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
+      volumes:
+        - name: realm
+          configMap:
+            name: keycloak-realm
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  namespace: ide-services
+  labels:
+    app: keycloak
+spec:
+  selector:
+    app: keycloak
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: keycloak
+  namespace: ide-services
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "1024m"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: keycloak.ide-services.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port:
+                  number: 8080

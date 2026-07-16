@@ -36,6 +36,9 @@
 │   ├── save-images.sh          # 有网机器：拉取并打包镜像
 │   ├── load-images.sh          # 离线机器：导入镜像
 │   └── gen-certs.sh            # 生成自签名证书（HTTPS 用）
+├── kubernetes/
+│   ├── values.yaml             # Helm Chart 配置示例
+│   └── README.md               # K8s 部署指南
 └── examples/
     └── ide-services-cli/       # 示例：用 CLI 下载 IntelliJ IDEA 并发布到 MinIO
 ```
@@ -206,7 +209,16 @@ docker compose down -v                 # 停止并清空所有数据（含 DB / 
 docker compose restart ide-services    # 重启服务端
 ```
 
-## 七、故障排查
+## 八、Kubernetes 部署
+
+如果你需要在大规模生产环境或云原生环境中部署 IDE Services，请参考 `kubernetes/` 目录：
+
+- **[kubernetes/README.md](kubernetes/README.md)**: 详细介绍了如何使用 Helm Chart 进行在线和离线部署。
+- **[kubernetes/values-minikube.yaml](kubernetes/values-minikube.yaml)**: 提供了 K8s 部署所需的配置参数模板。
+
+官方详细文档请参考：[Install IDE Services in a Kubernetes cluster](https://www.jetbrains.com/help/ide-services/install-instance-in-kubernetes-cluster.html)
+
+## 九、故障排查
 
 - **ide-services 启动即退出**：先确认 `postgres` 健康、`minio-init` 已成功创建 bucket，
   再看 `docker compose logs ide-services` 是否为 DB 连接或 auth 证书拉取失败。
