@@ -1,0 +1,61 @@
+@startuml
+autonumber
+skinparam Style strictuml
+skinparam BoxPadding 10
+skinparam ParticipantPadding 10
+
+box "使用者與 IDE 客戶端\n(User & IDE Client)" #LightBlue
+actor "使用者\n(User)" as User
+participant "瀏覽器 / IDE\n(Browser / IDE)" as Client
+end box
+
+box "JetBrains身份認證系統\n(Identity Provider - IdP)" #LightYellow
+participant "IdP /授權" as IdP_Auth
+participant "IdP /產生token" as IdP_Token
+participant "IdP /JWKS" as IdP_JWKS
+end box
+
+box "JetBrains IDE Services 伺服器\n(License Vault)" #LightGreen
+participant "IDE Services\n伺服器" as Server
+end box
+
+== 第一階段：取得授權碼 (Front-Channel) ==
+
+User -> Client:  啟動登入 / 請求授權
+activate Client
+
+Client -> IdP_Auth:  重導向請求認證 (Redirect to IdP)\n包含參數:\n - response_type=code\n - client_id\n - redirect_uri\n - state=xyzSecureRandomString\n - scope=openid profile email groups
+deactivate Client
+
+User -> IdP_Auth:  使用者登入並授權\n(登入資訊由 IdP 驗證，不儲存於伺服器)
+
+IdP_Auth --> Client:  發送授權碼 (Redirect to redirect_uri)\n包含參數:\n - code=splat-9876543210-authcode\n - state=xyzSecureRandomString
+activate Client
+
+Client -> Server:  傳送授權碼 (code) 與 state
+activate Server
+
+== 第二階段：交換 Token 並發放授權 (Back-Channel) ==
+
+Server -> Server:  比對 state 防偽 (CSRF 防護)
+
+Server -> IdP_Token:  交換 Token (HTTPS POST)\nPOST Body (x-www-form-urlencoded):\n - grant_type=authorization_code\n - code\n - redirect_uri\n - client_id\n - client_secret (密鑰安全地由伺服器保管)
+activate IdP_Token
+
+IdP_Token --> Server:  回傳 Token 響應 (Token Response)\nJSON 數據:\n - id_token\n - access_token\n - token_type: Bearer\n - expires_in: 3600
+deactivate IdP_Token
+
+Server -> IdP_JWKS:  請求公開金鑰驗證簽章
+activate IdP_JWKS
+IdP_JWKS --> Server:  回傳 JWKS (IdP 公開金鑰)
+deactivate IdP_JWKS
+
+Server -> Server:  本地解析與授權驗證\n - 驗證 ID Token (JWT) 簽章與有效期\n - 提取使用者 email / groups\n - 執行群組匹配\n   (例: RND-IntelliJ-Users -> IntelliJ Pack)
+
+Server --> Client:  發放本地授權憑證\n(Local License Ticket)
+deactivate Server
+
+Client --> User:  啟動 IDE 成功
+deactivate Client
+
+@enduml
